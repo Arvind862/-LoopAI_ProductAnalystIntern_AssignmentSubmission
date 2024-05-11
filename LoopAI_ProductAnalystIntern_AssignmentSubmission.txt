@@ -1,0 +1,45 @@
+WITH UEats_Business_Hours AS (
+  SELECT 
+    vb_name AS restaurant_slug,
+    TIME(TIMESTAMP_SUB(TIMESTAMP_ADD(CAST(JSON_EXTRACT_SCALAR(response, '$.regularHours[0].hours[0].start') AS TIMESTAMP), INTERVAL 0 SECOND), INTERVAL 5 HOUR)) AS ue_start_time,
+    TIME(TIMESTAMP_SUB(TIMESTAMP_ADD(CAST(JSON_EXTRACT_SCALAR(response, '$.regularHours[0].hours[0].end') AS TIMESTAMP), INTERVAL 0 SECOND), INTERVAL 5 HOUR)) AS ue_end_time
+  FROM 
+    arboreal-vision-339901.take_home_v2.virtual_kitchen_ubereats_hours
+),
+GHub_Business_Hours AS (
+  SELECT 
+    vb_name AS restaurant_slug,
+    TIME(TIMESTAMP_SUB(TIMESTAMP_ADD(CAST(JSON_EXTRACT_SCALAR(response, '$.regular_hours[0].start') AS TIMESTAMP), INTERVAL 0 SECOND), INTERVAL 5 HOUR)) AS gh_start_time,
+    TIME(TIMESTAMP_SUB(TIMESTAMP_ADD(CAST(JSON_EXTRACT_SCALAR(response, '$.regular_hours[0].end') AS TIMESTAMP), INTERVAL 0 SECOND), INTERVAL 5 HOUR)) AS gh_end_time
+  FROM 
+    arboreal-vision-339901.take_home_v2.virtual_kitchen_grubhub_hours
+),
+Merged_Hours AS (
+  SELECT 
+    COALESCE(gh.restaurant_slug, ue.restaurant_slug) AS restaurant_slug,
+    gh_start_time,
+    gh_end_time,
+    ue_start_time,
+    ue_end_time,
+    CASE 
+      WHEN 
+        gh_start_time >= ue_start_time AND gh_end_time <= ue_end_time THEN 'In Range'
+      WHEN 
+        gh_start_time < ue_start_time OR gh_end_time > ue_end_time THEN 'Out of Range'
+      ELSE 'Out of Range with 5 mins difference'
+    END AS is_out_of_range
+  FROM 
+    GHub_Business_Hours gh
+  FULL OUTER JOIN 
+    UEats_Business_Hours ue
+  ON 
+    gh.restaurant_slug = ue.restaurant_slug
+)
+SELECT 
+  m.restaurant_slug AS Grubhub_slug,
+  CONCAT(CAST(m.gh_start_time AS STRING), ' - ', CAST(m.gh_end_time AS STRING)) AS Grubhub_Business_Hours,
+  m.restaurant_slug AS UberEats_slug,
+  CONCAT(CAST(m.ue_start_time AS STRING), ' - ', CAST(m.ue_end_time AS STRING)) AS UberEats_Business_Hours,
+  m.is_out_of_range AS is_out_of_range
+FROM 
+  Merged_Hours m;
